@@ -1,9 +1,8 @@
-import { deepEqual } from "assert";
 import * as http from "http";
 
 interface IAssertion {
   name: string;
-  value: string;
+  snapshot: string;
 }
 
 interface IFlow {
@@ -52,7 +51,7 @@ export function check(name: string, fn: (data: any) => Promise<any>) {
   parentFlow.fns.push(async (data: any) => {
     log("CHECK: %s", name);
     const value = await fn ? fn(data) : data;
-    parentFlow.assertions.push({name, value: JSON.stringify(value)});
+    parentFlow.assertions.push({name, snapshot: JSON.stringify(value)});
   });
 }
 
