@@ -1,73 +1,31 @@
 import { deepEqual } from "assert";
-import { List, Map, Record } from "immutable";
+import * as http from "http";
 
-enum AssertionResult {
-  Unknown = "UNKNOWN",
-  New = "NEW",
-  Match = "MATCH",
-  Miss = "MISS",
+interface IAssertion {
+  name: string;
+  value: string;
 }
 
-interface IAssertionParams {
-  id?: number;
-  name?: string;
-  result?: AssertionResult;
-  value?: string;
-  snapshot?: string;
-}
-export class Assertion extends Record({ id: 0, name: "", result: AssertionResult.Unknown, snapshot: "", value: "" }) {
-  public id: number;
-  public name: string;
-  public result: AssertionResult;
-  public value: string;
-  public snapshot: string;
-
-  constructor(params?: IAssertionParams) {
-    super(params);
-  }
-
-  public with(values: IAssertionParams) {
-    return this.merge(values) as this;
-  }
-}
-
-interface IFlowParams {
-  id?: number;
-  name?: string;
-  assertions?: List<Assertion>;
-}
-export class Flow extends Record({ id: 0, name: "", assertions: List<Assertion>() }) {
-  public id: number;
-  public name: string;
-  public assertions: List<Assertion>;
-
-  constructor(params?: IFlowParams) {
-    super(params);
-  }
-
-  public with(values: IFlowParams) {
-    return this.merge(values) as this;
-  }
+interface IFlow {
+  name: string;
+  assertions: IAssertion[];
+  fns: Array<(data: any) => Promise<any>>;
 }
 
 // Ordered list of registered Flow's
-let FLOWS = List<Flow>();
-// Ordered list of list of `act` or `check` functions to call in order
-// when running a Flow.
-let FLOW_FNS = List<List<(data: any) => any>>();
+const FLOWS: IFlow[] = [];
 // Flow currently being defined, must be a global so that top-level
 // `act` and `check` can know on which Flow to add their functions & assertions
-let currentFlow: Flow = null;
+let currentFlow: IFlow = null;
 
-export function flow(name: string, fn: () => () => void) {
+export function flow(name: string, fn: () => void) {
   if (currentFlow) {
     throw new Error("You can't nest flows. Do not call `flow` within an other `flow` definition.");
   }
 
   // Setup globals
-  currentFlow = new Flow({id: FLOWS.size, name});
-  FLOWS = FLOWS.push(currentFlow);
-  FLOW_FNS = FLOW_FNS.push(List<(data: any) => any>());
+  currentFlow = { name, fns: [] } as IFlow;
+  FLOWS.push(currentFlow);
 
   // Call callback which in turn will be calling act and check
   fn();
@@ -80,95 +38,95 @@ export function act(name: string, fn: (data: any) => Promise<any>) {
   if (!currentFlow) {
     throw new Error("You can't call `act` outside of a flow.");
   }
-  FLOW_FNS = FLOW_FNS.update(currentFlow.id, (fns) => fns.push((data: any) => {
-    /* tslint:disable-next-line:no-console */
-    console.log("  ACT: " + name);
-    return Promise.resolve().then(() => fn(data));
-  }));
+  currentFlow.fns.push(async (data: any) => {
+    log("  ACT: %s", name);
+    return await fn(data);
+  });
 }
 
 export function check(name: string, fn: (data: any) => Promise<any>) {
   if (!currentFlow) {
     throw new Error("You can't call `check` outside of a flow.");
   }
-  const parentFlow = FLOWS.get(currentFlow.id);
-  const assertion = new Assertion({ id: parentFlow.assertions.size, name });
-  FLOWS = FLOWS.set(parentFlow.id, parentFlow.with({
-    assertions: parentFlow.assertions.push(assertion),
-  }));
-  FLOW_FNS = FLOW_FNS.update(parentFlow.id, (fns) => fns.push((data: any) => {
-    /* tslint:disable-next-line:no-console */
-    console.log("CHECK: " + name);
-    return Promise.resolve().then(() => fn ? fn(data) : data).then((value) => {
-      // Re-fetch flow & assertion value out of globals because our references
-      // are pointing to outdated immutable versions
-      const f = FLOWS.get(parentFlow.id);
-      const a = f.assertions.get(assertion.id);
-
-      // Compute assertion result
-      let result = AssertionResult.New;
-      if (a.snapshot) {
-        try {
-          deepEqual(value, JSON.parse(a.snapshot));
-          result = AssertionResult.Match;
-        } catch (e) {
-          /* tslint:disable:no-console */
-          console.log("     : " + JSON.stringify(value));
-          console.log("     : !=");
-          console.log("     : " + a.snapshot);
-          /* tslint:enable:no-console */
-          result = AssertionResult.Miss;
-        }
-      }
-
-      // Save assertion result & new snapshot value
-      FLOWS = FLOWS.set(f.id, f.with({
-        assertions: f.assertions.set(a.id, a.with({
-          result, value: JSON.stringify(value),
-        })),
-      }));
-    });
-  }));
+  const parentFlow = currentFlow;
+  parentFlow.fns.push(async (data: any) => {
+    log("CHECK: %s", name);
+    const value = await fn ? fn(data) : data;
+    parentFlow.assertions.push({name, value: JSON.stringify(value)});
+  });
 }
 
-export async function run(flows: List<Flow>) {
-  // Clear flows of snapshots
-  FLOWS = FLOWS.map((f) => f.with({
-    assertions: f.assertions.map((a) => a.with({ snapshot: null })),
-  }));
+export async function run() {
+  for (const f of FLOWS) {
+    // Reset assertions results
+    f.assertions = [];
 
-  // Merge registered flows with provided flows (w/ snapshots)
-  for (const f of flows) {
-    const fMatch = FLOWS.find((f2) => f2.name === f.name);
-    if (fMatch) {
-      let mergedAssertions = f.assertions;
-      for (const a of f.assertions) {
-        const aMatch = fMatch.assertions.find((a2) => a2.name === a.name);
-        if (aMatch) {
-          mergedAssertions = mergedAssertions.set(aMatch.id, aMatch.with({
-            result: a.result,
-            snapshot: a.snapshot,
-          }));
-        } else {
-          mergedAssertions = mergedAssertions.push(a.with({ id: mergedAssertions.size }));
-        }
-      }
-      FLOWS = FLOWS.set(f.id, f.with({assertions: mergedAssertions}));
-    } else {
-      FLOWS = FLOWS.push(f.with({ id: FLOWS.size }));
-    }
-  }
+    log(" FLOW: %s", f.name);
 
-  // Run flows
-  for (const f of FLOWS.toSeq()) {
-    /* tslint:disable-next-line:no-console */
-    console.log(" FLOW: " + f.name);
-    const fns = FLOW_FNS.get(f.id);
+    // Start with `null` as current value and thread returned results through
+    // each subsequent `act` or `check` function.
     let result = null;
-    for (const fn of fns) {
+    for (const fn of f.fns) {
       result = await fn(result);
     }
   }
 
   return FLOWS;
+}
+
+const error4002 = {
+  cause: "The request's URI points to a resource which does not exist.",
+  code: 4002,
+  message: "Requested resource not found",
+};
+const error5000 = {
+  cause: "An unknown error occured while processing this request.",
+  code: 5000,
+  message: "Internal server error",
+};
+
+function renderJson(res: http.ServerResponse, statusCode: number, body: any) {
+  res.setHeader("Content-Type", "application/json");
+  res.statusCode = statusCode;
+  res.end(JSON.stringify(body));
+}
+
+export function start() {
+  const env = process.env.NODE_ENV || "development";
+  const port = process.env.PORT || "3000";
+  const server = http.createServer(async (req, res) => {
+    if (env !== "test") {
+      log("%s %s", req.method, req.url);
+    }
+
+    // Hande 404s
+    if (req.url !== "/") {
+      return renderJson(res, 404, error4002);
+    }
+
+    // Handle page (GET /)
+    if (req.method !== "POST") {
+      return renderJson(res, 200, {});
+    }
+
+    // Run flows
+    try {
+      const flows = await run();
+      renderJson(res, 200, flows.map((f) => ({
+        assertions: f.assertions,
+        name: f.name,
+      })));
+    } catch (e) {
+      log("error", e);
+      return renderJson(res, 500, error5000);
+    }
+  });
+
+  server.listen(parseInt(port, 10));
+  log("automated-qa worker listening on port %s", port);
+}
+
+function log(...args: any[]) {
+  // tslint:disable-next-line:no-console
+  console.log(...args);
 }

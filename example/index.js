@@ -1,4 +1,4 @@
-const { flow, act, check } = require("../worker/dist");
+const { flow, act, check, start } = require("../dist"); // or "automated-qa-sdk"
 let request = require("request-promise-native");
 
 request = request.defaults({
@@ -143,3 +143,5 @@ flow("Basic API functionality", () => {
   act("test first API key", getListOfTodos);
   check("first key should be invalid");
 });
+
+start();
