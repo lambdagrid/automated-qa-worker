@@ -90,6 +90,41 @@ function renderJson(res: http.ServerResponse, statusCode: number, body: any) {
   res.end(JSON.stringify(body));
 }
 
+export function start() {
+  const env = process.env.NODE_ENV || "development";
+  const port = process.env.PORT || "3000";
+  const server = http.createServer(async (req, res) => {
+    if (env !== "test") {
+      log("%s %s", req.method, req.url);
+    }
+
+    // Hande 404s
+    if (req.url !== "/") {
+      return renderJson(res, 404, error4002);
+    }
+
+    // Handle page (GET /)
+    if (req.method !== "POST") {
+      return renderJson(res, 200, {});
+    }
+
+    // Run flows
+    try {
+      const flows = await run();
+      renderJson(res, 200, flows.map((f) => ({
+        assertions: f.assertions,
+        name: f.name,
+      })));
+    } catch (e) {
+      log("error", e);
+      return renderJson(res, 500, error5000);
+    }
+  });
+
+  server.listen(parseInt(port, 10));
+  log("automated-qa worker listening on port %s", port);
+}
+
 function log(...args: any[]) {
   // tslint:disable-next-line:no-console
   console.log(...args);
