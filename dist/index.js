@@ -62,7 +62,10 @@ function run() {
                 result = yield fn(result);
             }
         }
-        return FLOWS;
+        return FLOWS.map((f) => ({
+            assertions: f.assertions,
+            name: f.name,
+        }));
     });
 }
 exports.run = run;

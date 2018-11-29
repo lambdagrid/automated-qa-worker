@@ -70,7 +70,10 @@ export async function run() {
     }
   }
 
-  return FLOWS;
+  return FLOWS.map((f) => ({
+    assertions: f.assertions,
+    name: f.name,
+  }));
 }
 
 const error4002 = {
