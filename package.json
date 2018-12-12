@@ -1,8 +1,9 @@
 {
   "name": "automated-qa-worker",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.0.1",
+  "description": "Worker for Automated QA by LambdaGrid",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "directories": {
     "test": "test"
   },
@@ -27,7 +28,6 @@
     "body-parser": "1.18.3",
     "express": "4.16.4",
     "immutable": "4.0.0-rc.12",
-    "nodemon": "1.18.6",
     "request": "^2.88.0",
     "request-promise-native": "^1.0.5"
   },
